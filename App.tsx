@@ -8,14 +8,18 @@
 import React from 'react';
 import type {PropsWithChildren} from 'react';
 import {
+  FlatList,
+  Image,
   SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
   useColorScheme,
+  useWindowDimensions,
   View,
 } from 'react-native';
+import { TabView } from 'react-native-tab-view';
 
 import {
   Colors,
@@ -24,74 +28,88 @@ import {
   LearnMoreLinks,
   ReloadInstructions,
 } from 'react-native/Libraries/NewAppScreen';
+import { useOrientation } from './src/useOrientation';
 
 type SectionProps = PropsWithChildren<{
   title: string;
 }>;
 
-function Section({children, title}: SectionProps): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-  return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
-          {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
-    </View>
-  );
-}
+
+
+const routes = [
+  { key: "first", title: "First" },
+  { key: "second", title: "Second" },
+];
+
+const data = [
+  { id: "1", title: "Item 1", imageUrl: "https://reactnative.dev/img/tiny_logo.png" },
+  { id: "2", title: "Item 2", imageUrl: "https://reactnative.dev/img/tiny_logo.png" },
+  { id: "3", title: "Item 3", imageUrl: "https://reactnative.dev/img/tiny_logo.png" },
+  { id: "4", title: "Item 4", imageUrl: "https://reactnative.dev/img/tiny_logo.png" },
+  { id: "5", title: "Item 5", imageUrl: "https://reactnative.dev/img/tiny_logo.png" },
+  { id: "6", title: "Item 6", imageUrl: "https://reactnative.dev/img/tiny_logo.png" },
+];
 
 function App(): React.JSX.Element {
   const isDarkMode = useColorScheme() === 'dark';
 
   const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
+    backgroundColor: !isDarkMode ? Colors.darker : Colors.lighter,
+  };
+
+  const layout = useWindowDimensions();
+  const [index, setIndex] = React.useState(0);
+  const { orientation, isLandscape, isPortrait } = useOrientation();
+  const renderScene = () => {
+    if (isLandscape) {
+      return (
+        <View style={{ flex: 1, backgroundColor: "#f0f0f0", flexDirection: "row" }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 20, margin: 10 }}>Orientation: {orientation}</Text>
+            <Image
+              source={{ uri: "https://reactnative.dev/img/tiny_logo.png" }}
+              style={{ width: 300, height: 180 }}
+            />
+          </View>
+          <FlatList
+            data={data}
+            renderItem={({ item }) => (
+              <View
+                style={{ width: "100%", flexDirection: "row", alignItems: "center", padding: 10 }}
+              >
+                <Image source={{ uri: item.imageUrl }} style={{ width: 100, height: 100 }} />
+                <Text>{item.title}</Text>
+              </View>
+            )}
+          />
+        </View>
+      );
+    }
+    return (
+      <View>
+        <Text style={{ fontSize: 20, margin: 10 }}>Orientation: {orientation}</Text>
+        <FlatList
+          data={data}
+          renderItem={({ item }) => (
+            <View style={{ width: "100%", flexDirection: "row" }}>
+              <Text>{item.title}</Text>
+              <Image source={{ uri: item.imageUrl }} style={{ width: 100, height: 100 }} />
+            </View>
+          )}
+        />
+      </View>
+    );
   };
 
   return (
-    <SafeAreaView style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }}>
+      <TabView
+        navigationState={{ index, routes }}
+        renderScene={renderScene}
+        onIndexChange={setIndex}
+        initialLayout={{ width: layout.width }}
+        swipeEnabled
       />
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        style={backgroundStyle}>
-        <Header />
-        <View
-          style={{
-            backgroundColor: isDarkMode ? Colors.black : Colors.white,
-          }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
-        </View>
-      </ScrollView>
     </SafeAreaView>
   );
 }
