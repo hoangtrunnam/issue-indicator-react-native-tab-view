@@ -5,9 +5,10 @@
  * @format
  */
 
-import React from 'react';
+import React, { useCallback, useEffect, useState, useMemo, memo } from 'react';
 import type {PropsWithChildren} from 'react';
 import {
+  Dimensions,
   FlatList,
   Image,
   SafeAreaView,
@@ -18,8 +19,10 @@ import {
   useColorScheme,
   useWindowDimensions,
   View,
+  InteractionManager,
+  TextProps,
 } from 'react-native';
-import { TabView } from 'react-native-tab-view';
+import { TabView, SceneMap, TabBar, SceneRendererProps, NavigationState, TabBarItemProps, TabBarItem } from 'react-native-tab-view';
 
 import {
   Colors,
@@ -29,108 +32,313 @@ import {
   ReloadInstructions,
 } from 'react-native/Libraries/NewAppScreen';
 import { useOrientation } from './src/useOrientation';
+import { agents, groupedNews } from './src/constaint';
+import ItemTopNews from './src/ItemTopNews';
+import { TabBarIndicator } from './src/TabBarIndicator';
 
 type SectionProps = PropsWithChildren<{
   title: string;
 }>;
 
+type Route = { key: string; title: string };
 
 
-const routes = [
-  { key: "first", title: "First" },
-  { key: "second", title: "Second" },
-];
+interface CustomTabBarItemProps extends TabBarItemProps<Route> {
+  labelProps?: TextProps;
+}
 
-const data = [
-  { id: "1", title: "Item 1", imageUrl: "https://reactnative.dev/img/tiny_logo.png" },
-  { id: "2", title: "Item 2", imageUrl: "https://reactnative.dev/img/tiny_logo.png" },
-  { id: "3", title: "Item 3", imageUrl: "https://reactnative.dev/img/tiny_logo.png" },
-  { id: "4", title: "Item 4", imageUrl: "https://reactnative.dev/img/tiny_logo.png" },
-  { id: "5", title: "Item 5", imageUrl: "https://reactnative.dev/img/tiny_logo.png" },
-  { id: "6", title: "Item 6", imageUrl: "https://reactnative.dev/img/tiny_logo.png" },
-];
+// Tạo component riêng để tránh re-render
+const NewsListItem = memo(({ item, index }: { item: any; index: number }) => {
+  return <ItemTopNews index={index} news={item} />;
+});
 
-function App(): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
+const CustomTabBarItem = (props: CustomTabBarItemProps) => {
+  return <TabBarItem {...props} />;
+};
 
-  const backgroundStyle = {
-    backgroundColor: !isDarkMode ? Colors.darker : Colors.lighter,
-  };
+const customTabInficator = (props: SceneRendererProps & { navigationState: NavigationState<Route> }) => {
+  return <TabBarIndicator {...props} />;
+};
 
+const NewsListHeader = memo(({ contentData }: { contentData: any[] }) => {
+  if (contentData.length === 0) return null;
+  return (
+    <ItemTopNews
+      index={0}
+      news={contentData[0]}
+      imageStyle={{ width: 360, height: 200 }}
+    />
+  );
+});
+
+const EmptyComponent = memo(() => (
+  <View style={styles.noItemsView}>
+    <Text style={[styles.noItemsText]}>{'no_items_to_show'}</Text>
+  </View>
+));
+
+// Optimize styles - extract inline styles
+const landscapeContainerStyle = { flex: 1, flexDirection: 'row' as const };
+const landscapeImageContainerStyle = { flex: 1 };
+const landscapeListContainerStyle = { flex: 1 };
+const portraitContainerStyle = { flex: 1 };
+const landscapeImageStyle = { width: '100%' as any, height: 180 };
+const portraitImageStyle = { width: 360, height: 200 };
+const flatListContentStyle = { paddingBottom: 24 };
+
+// Scene component với memo
+const TabScene = memo(({ route, realGroupedNewsData, isLandscape }: { 
+  route: Route; 
+  realGroupedNewsData: any[];
+  isLandscape: boolean;
+}) => {
+  const group = realGroupedNewsData.find((g) => `tab_${g.realIndex}` === route.key);
+
+  if (!group) {
+    return <EmptyComponent />;
+  }
+
+  const contentData = group.data;
+  
+  if (!contentData || contentData.length === 0) {
+    return <EmptyComponent />;
+  }
+
+  if (isLandscape) {
+    return (
+      <View style={landscapeContainerStyle}>
+        <View style={landscapeImageContainerStyle}>
+          {contentData[0] && (
+            <ItemTopNews
+              index={0}
+              news={contentData[0]}
+              imageStyle={landscapeImageStyle}
+            />
+          )}
+        </View>
+        <View style={landscapeListContainerStyle}>
+          <FlatList
+            style={styles.newsList}
+            contentContainerStyle={flatListContentStyle}
+            showsVerticalScrollIndicator={false}
+            keyExtractor={(item) => `#${item.id}`}
+            data={contentData.slice(1)}
+            renderItem={({ item, index }) => <NewsListItem item={item} index={index} />}
+            removeClippedSubviews={true}
+            maxToRenderPerBatch={5}
+            windowSize={10}
+            initialNumToRender={5}
+            ListEmptyComponent={EmptyComponent}
+            getItemLayout={(data, index) => ({
+              length: 100, // estimated item height
+              offset: 100 * index,
+              index
+            })}
+          />
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={portraitContainerStyle}>
+      <FlatList
+        style={styles.newsList}
+        contentContainerStyle={flatListContentStyle}
+        showsVerticalScrollIndicator={false}
+        keyExtractor={(item) => `#${item.id}`}
+        data={contentData.slice(1)}
+        renderItem={({ item, index }) => <NewsListItem item={item} index={index} />}
+        ListHeaderComponent={<NewsListHeader contentData={contentData} />}
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={5}
+        windowSize={10}
+        initialNumToRender={5}
+        ListEmptyComponent={EmptyComponent}
+        getItemLayout={(data, index) => ({
+          length: 100, // estimated item height
+          offset: 100 * index + 200, // plus header height
+          index
+        })}
+      />
+    </View>
+  );
+});
+
+function NewsList(): React.JSX.Element {
+  const [isLoading, setIsLoading] = useState(true);
+  const [routes, setRoutes] = useState<Route[]>([]);
   const layout = useWindowDimensions();
   const [index, setIndex] = React.useState(0);
   const { orientation, isLandscape, isPortrait } = useOrientation();
-  const renderScene = () => {
-    if (isLandscape) {
-      return (
-        <View style={{ flex: 1, backgroundColor: "#f0f0f0", flexDirection: "row" }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 20, margin: 10 }}>Orientation: {orientation}</Text>
-            <Image
-              source={{ uri: "https://reactnative.dev/img/tiny_logo.png" }}
-              style={{ width: 300, height: 180 }}
-            />
-          </View>
-          <FlatList
-            data={data}
-            renderItem={({ item }) => (
-              <View
-                style={{ width: "100%", flexDirection: "row", alignItems: "center", padding: 10 }}
-              >
-                <Image source={{ uri: item.imageUrl }} style={{ width: 100, height: 100 }} />
-                <Text>{item.title}</Text>
-              </View>
-            )}
-          />
-        </View>
-      );
+  
+  // Memoize để tránh tính toán lại
+  const windowWidth = useMemo(() => {
+    return Dimensions.get('window').width || layout.width;
+  }, [layout.width]);
+  
+  // Memoize data transformation
+  const realGroupedNewsData = useMemo(() => {
+    return groupedNews.map((group, index) => ({
+      ...group,
+      realIndex: index,
+    }));
+  }, []);
+
+  useEffect(() => {
+    setIsLoading(true);
+    const realGroupedNewsData: any[] = groupedNews.map((group, index) => ({
+      ...group,
+      realIndex: index,
+    }));
+    if (realGroupedNewsData.length > 0) {
+      const agentTitleByIndex: Record<number, string> = {};
+      agents.forEach((agent) => {
+        agentTitleByIndex[agent.data.index] = agent.title;
+      });
+
+      const newRoutes: any[] = realGroupedNewsData.map((g) => {
+        const lookupKey = g.realIndex! + 1;
+        return {
+          key: `tab_${g.realIndex}`,
+          title: agentTitleByIndex[lookupKey] ?? g.category,
+        };
+      });
+
+      setRoutes(newRoutes);
+      setIsLoading(false);
     }
-    return (
-      <View>
-        <Text style={{ fontSize: 20, margin: 10 }}>Orientation: {orientation}</Text>
-        <FlatList
-          data={data}
-          renderItem={({ item }) => (
-            <View style={{ width: "100%", flexDirection: "row" }}>
-              <Text>{item.title}</Text>
-              <Image source={{ uri: item.imageUrl }} style={{ width: 100, height: 100 }} />
-            </View>
-          )}
+  }, [groupedNews, agents]);
+
+  const renderScene = useCallback(
+    ({ route }: { route: Route }) => {
+      return <TabScene route={route} realGroupedNewsData={realGroupedNewsData} isLandscape={isLandscape} />;
+    },
+    [realGroupedNewsData, isLandscape]
+  );
+
+  // Memoize initial layout để tránh re-calculate
+  const initialLayout = useMemo(() => ({
+    width: windowWidth
+  }), [windowWidth]);
+
+  // Delay render TabView để tránh lag khi orientation change
+  const [shouldRenderTabView, setShouldRenderTabView] = useState(false);
+
+  useEffect(() => {
+    if (!isLoading && routes.length > 0) {
+      // Delay render một chút để smooth transition
+      InteractionManager.runAfterInteractions(() => {
+        setShouldRenderTabView(true);
+      });
+    }
+  }, [isLoading, routes.length]);
+
+  // Reset khi orientation change
+  useEffect(() => {
+    setShouldRenderTabView(false);
+    const timer = setTimeout(() => {
+      setShouldRenderTabView(true);
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [orientation]);
+
+  const renderTabBar = (props: SceneRendererProps & { navigationState: NavigationState<Route> }) => (
+    <TabBar
+      {...props}
+      scrollEnabled
+      style={[styles.containerTabbar]}
+      contentContainerStyle={{
+        justifyContent: routes.length === 1 ? 'center' : 'flex-start',
+        paddingRight: 0,
+      }}
+      tabStyle={{
+        width: 'auto',
+      }}
+      activeColor={'#fff'}
+      inactiveColor={'#000'}
+      indicatorStyle={styles.indicatorStyle}
+      gap={20}
+      direction={'ltr'}
+      renderIndicator={customTabInficator}
+      renderTabBarItem={(props) => (
+        <CustomTabBarItem
+          {...props}
+          labelStyle={[styles.labelStyle, { maxWidth: layout.width - 100 }]}
+          labelProps={{ numberOfLines: 1 }}
         />
-      </View>
-    );
-  };
+      )}
+    />
+  );
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }}>
-      <TabView
-        navigationState={{ index, routes }}
-        renderScene={renderScene}
-        onIndexChange={setIndex}
-        initialLayout={{ width: layout.width }}
-        swipeEnabled
-      />
+    <SafeAreaView style={[styles.container]}>
+      <View style={{ width: '100%' }}>
+      </View>
+      {!isLoading && routes.length > 0 && groupedNews.length > 0 && shouldRenderTabView && (
+        <View style={styles.containerTabview}>
+          <TabView
+            style={styles.containerTabview}
+            navigationState={{ index, routes }}
+            renderScene={renderScene}
+            onIndexChange={setIndex}
+            renderTabBar={renderTabBar}
+            swipeEnabled={true}
+            initialLayout={initialLayout}
+            lazy
+            lazyPreloadDistance={0}
+            renderLazyPlaceholder={() => <View style={styles.lazyPlaceholder} />}
+          />
+        </View>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
   },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
+  containerTabview: {
+    flex: 1,
   },
-  sectionDescription: {
-    marginTop: 8,
+  containerTabbar: {
+    backgroundColor: 'red',
+    marginHorizontal: 20,
+    elevation: 0,
+    shadowColor: 'transparent',
+  },
+  indicatorStyle: {
+    height: '50%',
+    top: '25%',
+    bottom: '25%',
+  },
+  screenTitle: {
     fontSize: 18,
-    fontWeight: '400',
+    fontWeight: '600',
+    color: 'blue',
   },
-  highlight: {
-    fontWeight: '700',
+  newsList: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  noItemsView: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noItemsText: {
+    color: "#000",
+    fontSize: 15,
+  },
+  labelStyle: { fontSize: 12, fontWeight: '500' },
+  lazyPlaceholder: {
+    flex: 1,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
 
-export default App;
+export default NewsList;
